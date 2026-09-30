@@ -6,5 +6,5 @@ compatibility_date = "2025-09-01"
 crons = ["*/5 * * * *"]
 
 [vars]
-POLL_URL = "https://investinews.pages.dev/api/jobs/poll"
+POLL_URL = "https://investinews.ammestic.co.za/api/jobs/poll"
 # JOB_TOKEN: set with `wrangler secret put JOB_TOKEN` (must equal the Pages project's JOB_TOKEN secret)

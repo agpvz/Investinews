@@ -11,5 +11,6 @@ database_id = "REPLACE_WITH_D1_DATABASE_ID"   # from: wrangler d1 create investi
 
 [vars]
 APP_TZ = "Africa/Johannesburg"
+BASE_URL = "https://investinews.ammestic.co.za"
 SEC_USER_AGENT = "investinews personal news terminal (set your contact email here)"
 # Secrets (set with: wrangler pages secret put NAME): APP_TOKEN, JOB_TOKEN, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT

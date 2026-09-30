@@ -31,32 +31,25 @@ Tests: `npm test` (unit + integration), `npm run typecheck`, `npm run test:e2e` 
 
 Data lives in `data/investinews.sqlite` (change with `DATABASE_PATH`). Migrations in `migrations/` apply automatically at start. Export JSON from Settings; delete everything from Settings → Data.
 
-## Deploy on Cloudflare Pages (always-on, closed-app push)
+## Publish automatically to investinews.ammestic.co.za (Cloudflare Pages)
 
-The same code runs as a Pages project: static frontend from `dist/`, API as Pages Functions (`functions/api/[[path]].ts`), storage in D1.
+Every push to `main` (and to the current working branch) runs `.github/workflows/deploy.yml`, which tests, builds and then provisions and deploys everything on Cloudflare: the D1 database and its migrations, the Pages project, application secrets, the production deployment, the custom domain `investinews.ammestic.co.za` with its proxied CNAME record (when the `ammestic.co.za` zone is on the same Cloudflare account), and a cron Worker that polls sources every 5 minutes. Re-runs are idempotent.
 
-```bash
-npm install -g wrangler && wrangler login
-wrangler d1 create investinews                 # copy database_id into wrangler.toml
-wrangler d1 migrations apply investinews --remote
-wrangler pages project create investinews --production-branch main
-npm run vapid                                  # generate keys once
-wrangler pages secret put APP_TOKEN            # required: protects your watchlist and feed URLs
-wrangler pages secret put JOB_TOKEN            # required: lets the cron trigger the poll job
-wrangler pages secret put VAPID_PUBLIC_KEY
-wrangler pages secret put VAPID_PRIVATE_KEY
-wrangler pages secret put VAPID_SUBJECT        # mailto:you@example.com
-npm run cf:deploy                              # vite build + wrangler pages deploy dist
-```
+One-time setup, in the GitHub repository under *Settings → Secrets and variables → Actions*:
 
-Set `SEC_USER_AGENT` (and `APP_TZ`) in `wrangler.toml` `[vars]` or the Pages dashboard, then bind the D1 database to the project (Pages → Settings → Functions → D1 bindings → `DB`) if you created the project in the dashboard.
+| Secret | Required | Where it comes from |
+| --- | --- | --- |
+| `CLOUDFLARE_API_TOKEN` | yes | Cloudflare dashboard → My Profile → API Tokens → Create Token. Permissions: **Account · Cloudflare Pages · Edit**, **Account · D1 · Edit**, **Account · Workers Scripts · Edit**, **Zone · DNS · Edit** (zone `ammestic.co.za`). |
+| `CLOUDFLARE_ACCOUNT_ID` | yes | Cloudflare dashboard sidebar (Workers & Pages overview). |
+| `APP_TOKEN` | strongly recommended | any long random string; it is the sign-in token for the app. Without it the API is open to the internet. |
+| `JOB_TOKEN` | strongly recommended | any long random string; lets the cron Worker trigger polling. Without it nothing polls in the background. |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | for push | run `npm run vapid` once locally and paste the three values (`VAPID_SUBJECT` is `mailto:you@example.com`). Keep them stable: rotating keys invalidates every device subscription. |
 
-**Scheduler.** Pages has no cron, so something must call `POST /api/jobs/poll` with header `X-Job-Token: <JOB_TOKEN>` every few minutes. Two ready options:
+Then push (or run the *deploy* workflow manually from the Actions tab). The first run prints the custom-domain status; DNS and the certificate usually take a few minutes. `https://investinews.pages.dev` works as a fallback URL immediately.
 
-1. GitHub Actions: `.github/workflows/poll.yml` runs every 5 minutes; add repository secrets `POLL_URL` (e.g. `https://investinews.pages.dev/api/jobs/poll`) and `JOB_TOKEN`.
-2. A tiny Cloudflare Worker with a Cron Trigger: `cd worker && wrangler secret put JOB_TOKEN && wrangler deploy` (edit `POLL_URL` in `worker/wrangler.toml`).
+If `ammestic.co.za` is **not** on Cloudflare DNS, the workflow warns and you add `CNAME investinews → investinews.pages.dev` at your DNS provider; Pages validates it automatically.
 
-Continuous deployment: `.github/workflows/deploy.yml` deploys on every push to `main` when `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets exist.
+Manual deployment from a laptop is the same sequence by hand (`wrangler login`, `wrangler d1 create investinews`, edit `database_id` in `wrangler.toml`, `npm run cf:migrate`, `wrangler pages secret put …`, `npm run cf:deploy`, add the custom domain in the Pages dashboard, `cd worker && wrangler deploy`).
 
 Local emulation of the Pages build: `npm run cf:build && npm run cf:migrate:local && npm run cf:dev` (D1 runs locally through Miniflare; put dev secrets in `.dev.vars`, see `.dev.vars.example`).
 

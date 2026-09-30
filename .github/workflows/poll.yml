@@ -1,3 +1,5 @@
+# Fallback scheduler (only needed if the cron Worker is not deployed). Runs every 5 minutes.
+# Note: GitHub disables scheduled workflows after 60 days without repository activity.
 name: poll
 on:
   schedule:
@@ -6,8 +8,12 @@ on:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    if: ${{ vars.POLL_ENABLED == 'true' }}
     steps:
       - name: Trigger poll job
+        env:
+          JOB_TOKEN: ${{ secrets.JOB_TOKEN }}
+          POLL_URL: ${{ secrets.POLL_URL }}
+          POLL_ENABLED: ${{ vars.POLL_ENABLED }}
         run: |
-          curl -fsS -X POST "${{ secrets.POLL_URL }}" -H "X-Job-Token: ${{ secrets.JOB_TOKEN }}" | head -c 2000
+          if [ "$POLL_ENABLED" != "true" ] || [ -z "$JOB_TOKEN" ]; then echo "GitHub-based polling disabled (set repository variable POLL_ENABLED=true and secret JOB_TOKEN to use it)"; exit 0; fi
+          curl -fsS -X POST "${POLL_URL:-https://investinews.ammestic.co.za/api/jobs/poll}" -H "X-Job-Token: $JOB_TOKEN" | head -c 2000

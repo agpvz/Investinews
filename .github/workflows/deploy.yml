@@ -1,8 +1,26 @@
+# Automatic publishing to Cloudflare Pages at https://investinews.ammestic.co.za
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   API token with: Account · Cloudflare Pages · Edit, Account · D1 · Edit,
+#                          Account · Workers Scripts · Edit (cron worker), Zone · DNS · Edit for ammestic.co.za
+#   CLOUDFLARE_ACCOUNT_ID  from the Cloudflare dashboard sidebar
+# Strongly recommended secrets (the app works without them but is open / silent):
+#   APP_TOKEN              sign-in token for the app (any long random string)
+#   JOB_TOKEN              token the cron worker uses to trigger polling
+#   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT   from `npm run vapid` (push notifications)
 name: deploy
 on:
   push:
-    branches: [main]
+    branches: [main, claude/free-bloomberg-terminal-news-15r2j2]
   workflow_dispatch:
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+env:
+  PROJECT: investinews
+  DOMAIN: investinews.ammestic.co.za
+  ZONE: ammestic.co.za
+  D1_NAME: investinews
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,20 +35,115 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-    if: ${{ vars.CF_DEPLOY_ENABLED == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npm run build
+      - name: Check Cloudflare credentials
+        id: creds
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$ACCOUNT" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Publishing skipped: add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Ensure D1 database exists and inject its id
+        if: steps.creds.outputs.enabled == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          find_id() { npx wrangler d1 list --json | jq -r --arg n "$D1_NAME" '.[] | select(.name==$n) | .uuid' | head -n1; }
+          ID="$(find_id || true)"
+          if [ -z "$ID" ]; then echo "Creating D1 database $D1_NAME"; npx wrangler d1 create "$D1_NAME" >/dev/null; ID="$(find_id)"; fi
+          [ -n "$ID" ] || { echo "::error::could not resolve D1 database id"; exit 1; }
+          sed -i "s/REPLACE_WITH_D1_DATABASE_ID/$ID/" wrangler.toml
+          grep -n database_id wrangler.toml
+      - name: Ensure Pages project exists
+        if: steps.creds.outputs.enabled == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ok=$(curl -sS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | jq -r '.success')
+          if [ "$ok" != "true" ]; then echo "Creating Pages project $PROJECT"; npx wrangler pages project create "$PROJECT" --production-branch main; fi
       - name: Apply D1 migrations
-        run: npx wrangler d1 migrations apply investinews --remote
+        if: steps.creds.outputs.enabled == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      - name: Deploy to Cloudflare Pages
-        run: npx wrangler pages deploy dist --project-name investinews
+        run: npx wrangler d1 migrations apply "$D1_NAME" --remote
+      - name: Sync application secrets to Pages
+        if: steps.creds.outputs.enabled == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          APP_TOKEN: ${{ secrets.APP_TOKEN }}
+          JOB_TOKEN: ${{ secrets.JOB_TOKEN }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+        run: |
+          set -euo pipefail
+          for k in APP_TOKEN JOB_TOKEN VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT; do
+            v="${!k:-}"
+            if [ -n "$v" ]; then printf '%s' "$v" | npx wrangler pages secret put "$k" --project-name "$PROJECT" >/dev/null && echo "set $k";
+            else echo "::warning::secret $k is not set (APP_TOKEN protects the app; JOB_TOKEN enables polling; VAPID_* enable push)"; fi
+          done
+      - name: Build and deploy to Pages (production)
+        if: steps.creds.outputs.enabled == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npm run build
+          npx wrangler pages deploy dist --project-name "$PROJECT" --branch main --commit-dirty=true
+      - name: Attach custom domain and DNS record
+        if: steps.creds.outputs.enabled == 'true'
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -uo pipefail
+          api() { curl -sS -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' "$@"; }
+          echo "Adding $DOMAIN to Pages project (idempotent)"
+          api -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/pages/projects/$PROJECT/domains" --data "{\"name\":\"$DOMAIN\"}" | jq -c '{success, errors: [.errors[]?.message]}'
+          ZID=$(api "https://api.cloudflare.com/client/v4/zones?name=$ZONE" | jq -r '.result[0].id // empty')
+          if [ -z "$ZID" ]; then
+            echo "::warning::Zone $ZONE is not on this Cloudflare account (or the token lacks Zone:DNS). Create a CNAME $DOMAIN -> $PROJECT.pages.dev at your DNS provider; Pages will validate it automatically."
+            exit 0
+          fi
+          RID=$(api "https://api.cloudflare.com/client/v4/zones/$ZID/dns_records?type=CNAME&name=$DOMAIN" | jq -r '.result[0].id // empty')
+          BODY="{\"type\":\"CNAME\",\"name\":\"$DOMAIN\",\"content\":\"$PROJECT.pages.dev\",\"proxied\":true,\"ttl\":1,\"comment\":\"investinews Pages (managed by GitHub Actions)\"}"
+          if [ -z "$RID" ]; then api -X POST "https://api.cloudflare.com/client/v4/zones/$ZID/dns_records" --data "$BODY" | jq -c '{success, errors: [.errors[]?.message]}';
+          else api -X PUT "https://api.cloudflare.com/client/v4/zones/$ZID/dns_records/$RID" --data "$BODY" | jq -c '{success, errors: [.errors[]?.message]}'; fi
+          echo "Custom domain status:"; api "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/pages/projects/$PROJECT/domains/$DOMAIN" | jq -c '.result | {status, validation_data, certificate_authority}'
+      - name: Deploy cron worker (polls every 5 minutes)
+        if: steps.creds.outputs.enabled == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          JOB_TOKEN: ${{ secrets.JOB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${JOB_TOKEN:-}" ]; then echo "::warning::JOB_TOKEN not set: cron worker skipped, sources will only poll on manual refresh."; exit 0; fi
+          cd worker
+          npx wrangler deploy --var POLL_URL:"https://$DOMAIN/api/jobs/poll"
+          printf '%s' "$JOB_TOKEN" | npx wrangler secret put JOB_TOKEN >/dev/null && echo "cron worker configured"
+      - name: Smoke test
+        if: steps.creds.outputs.enabled == 'true'
+        run: |
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /tmp/h.json -w '%{http_code}' "https://$DOMAIN/api/health" || true)
+            if [ "$code" = "200" ]; then echo "https://$DOMAIN is live: $(cat /tmp/h.json)"; exit 0; fi
+            echo "waiting for DNS/certificate ($code)…"; sleep 15
+          done
+          echo "::warning::https://$DOMAIN not reachable yet (DNS or certificate still propagating). Fallback URL: https://$PROJECT.pages.dev"
