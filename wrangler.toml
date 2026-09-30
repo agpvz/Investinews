@@ -1,0 +1,15 @@
+# Cloudflare Pages project: static frontend (dist/) + Pages Functions (functions/) + D1.
+name = "investinews"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "investinews"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"   # from: wrangler d1 create investinews
+
+[vars]
+APP_TZ = "Africa/Johannesburg"
+SEC_USER_AGENT = "investinews personal news terminal (set your contact email here)"
+# Secrets (set with: wrangler pages secret put NAME): APP_TOKEN, JOB_TOKEN, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT

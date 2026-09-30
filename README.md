@@ -1,98 +1,105 @@
-# Investinews — a free Bloomberg-terminal-style news monitor
+# Investinews
 
-Latest news on tickers and topics, for free, in a four-panel terminal UI that works the way a
-Bloomberg terminal does: a command line per panel, mnemonic functions (`TOP`, `WEI`, `AAPL CN`,
-`NI TECH`), numbered rows you open by typing the number and pressing `<GO>`, red function
-toolbars, a scrolling tape, world clocks, and headline alerts. All data comes from free public
-sources; there are no API keys to configure.
+A personal market news terminal. Save watches for tickers (`NASDAQ:NVDA`, `JSE:NPN`) and topics (`AI export controls`), let a scheduler ingest official and user-supplied feeds, see duplicates grouped into single events, and get one Web Push notification per genuinely new event, on desktop or as an iPhone Home Screen app.
 
-![screens](docs/screenshot.png)
+Free to run: no paid data, no LLM. Every source is honest about its status; see [docs/sources.md](docs/sources.md) for the exact source matrix and limits. Not affiliated with Bloomberg or any data vendor; nothing here is real-time.
 
-## Quick start
+![desktop](docs/screenshot-desktop.png)
+
+## Features
+
+- One command bar: `watch NASDAQ:NVDA`, `watch JSE:NPN`, `watch AI export controls`, `unwatch`, `open n`, `read n`, `mute`, `refresh`, `filter`, `sources`, `settings`, `help`. Bare symbols ask you to confirm the exchange.
+- Persistent ingestion (SQLite locally, Cloudflare D1 when deployed) with idempotent upserts, ETag/Last-Modified, per-source backoff and cooldown, overlap-safe job lock, retention pruning.
+- Deterministic clustering: SEC accession → exact URL → normalized title (syndication) → bounded fuzzy match with shared ticker/watch context. Different quarters, different accessions and corrections never merge. Manual merge/split with an override log; no repeated push after either.
+- Unified LATEST feed (first-published order by default, latest-update toggle; old events are never reordered by re-fetches), per-watch feeds, filters by watch/source/type/unread/window, full-text search, read state that survives restarts.
+- Web Push with VAPID: one notification per event per device (multiple watches coalesced), zero pushes on the initial backfill, idempotent across retries and restarts, per-watch scope (all / material / none), mute, quiet hours (Africa/Johannesburg), digest mode, opt-in update notifications, test button, expired-subscription cleanup.
+- Terminal-style PWA: dense monospace UI, keyboard shortcuts (`/`, `j`/`k`, `Enter`, `o`, `m`, `u`, `r`, `Esc`, `?`), single-column mobile layout with a detail sheet, installable, offline shell.
+
+## Run locally (single user, no login)
 
 ```bash
 npm install
-npm start                      # http://localhost:3000
-TICKERS=AAPL,MSFT TOPICS=AI,FED npm start   # seed the watchlist ("given" tickers/topics)
-DEMO=1 npm start               # offline demo data, no network needed
-npm test
+cp .env.example .env           # set SEC_USER_AGENT to your app name + email
+npm run vapid                  # paste the printed keys into .env to enable push
+npm run build                  # builds the frontend into dist/
+npm start                      # http://localhost:8787  (API + UI + scheduler)
 ```
 
-Open the terminal with tickers/topics in the URL to load them straight into the watchlist:
+Development with hot reload: `npm run dev` (Vite on :5173 proxies `/api` to the Node server on :8787).
+
+Tests: `npm test` (unit + integration), `npm run typecheck`, `npm run test:e2e` (Playwright browser test; needs the `playwright` package and a Chromium install).
+
+Data lives in `data/investinews.sqlite` (change with `DATABASE_PATH`). Migrations in `migrations/` apply automatically at start. Export JSON from Settings; delete everything from Settings → Data.
+
+## Deploy on Cloudflare Pages (always-on, closed-app push)
+
+The same code runs as a Pages project: static frontend from `dist/`, API as Pages Functions (`functions/api/[[path]].ts`), storage in D1.
+
+```bash
+npm install -g wrangler && wrangler login
+wrangler d1 create investinews                 # copy database_id into wrangler.toml
+wrangler d1 migrations apply investinews --remote
+wrangler pages project create investinews --production-branch main
+npm run vapid                                  # generate keys once
+wrangler pages secret put APP_TOKEN            # required: protects your watchlist and feed URLs
+wrangler pages secret put JOB_TOKEN            # required: lets the cron trigger the poll job
+wrangler pages secret put VAPID_PUBLIC_KEY
+wrangler pages secret put VAPID_PRIVATE_KEY
+wrangler pages secret put VAPID_SUBJECT        # mailto:you@example.com
+npm run cf:deploy                              # vite build + wrangler pages deploy dist
+```
+
+Set `SEC_USER_AGENT` (and `APP_TZ`) in `wrangler.toml` `[vars]` or the Pages dashboard, then bind the D1 database to the project (Pages → Settings → Functions → D1 bindings → `DB`) if you created the project in the dashboard.
+
+**Scheduler.** Pages has no cron, so something must call `POST /api/jobs/poll` with header `X-Job-Token: <JOB_TOKEN>` every few minutes. Two ready options:
+
+1. GitHub Actions: `.github/workflows/poll.yml` runs every 5 minutes; add repository secrets `POLL_URL` (e.g. `https://investinews.pages.dev/api/jobs/poll`) and `JOB_TOKEN`.
+2. A tiny Cloudflare Worker with a Cron Trigger: `cd worker && wrangler secret put JOB_TOKEN && wrangler deploy` (edit `POLL_URL` in `worker/wrangler.toml`).
+
+Continuous deployment: `.github/workflows/deploy.yml` deploys on every push to `main` when `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets exist.
+
+Local emulation of the Pages build: `npm run cf:build && npm run cf:migrate:local && npm run cf:dev` (D1 runs locally through Miniflare; put dev secrets in `.dev.vars`, see `.dev.vars.example`).
+
+### Storage and hosting requirements
+
+| Mode | Storage | Scheduler | Push while app closed |
+| --- | --- | --- | --- |
+| Local `npm start` | SQLite file | built-in timer (`POLL_INTERVAL_SEC`) | only while the machine and server run; needs HTTPS for push on other devices |
+| Cloudflare Pages + D1 | D1 (SQLite-compatible, persistent) | external cron → `/api/jobs/poll` | yes: Pages Functions send Web Push when the cron polls |
+| Any Node host (VPS, Fly, Railway) | SQLite volume or Postgres via a new `Db` adapter (`src/server/db.ts`; SQL is standard, FTS5 is optional) | built-in timer | yes with HTTPS |
+
+<img src="docs/screenshot-mobile.png" alt="mobile" width="300">
+
+## iPhone Home Screen push
+
+1. Deploy over HTTPS (Pages does this) and set the VAPID secrets.
+2. On the iPhone (iOS 16.4+): open the site in Safari → Share → **Add to Home Screen**.
+3. Open the app **from the Home Screen icon**, go to Settings → **enable notifications**, accept the permission prompt.
+4. Press **send test notification**. The delivery ledger under Diagnostics shows the push service response.
+5. Close the app; the next cron poll that finds a new matching event sends a notification to the phone.
+
+Details: <https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/>.
+
+## Configuration
+
+See `.env.example`. `APP_TOKEN` is optional on localhost and mandatory anywhere reachable from the internet (the API returns 401 without it, and the UI shows a sign-in). Feed URLs (Google Alerts feed URLs are private tokens), push endpoints and the VAPID private key never reach the client.
+
+## Project layout
 
 ```
-http://localhost:3000/?t=AAPL,MSFT,NVDA&topics=AI,FED&alerts=earnings
-http://localhost:3000/?cmd=SPX%20INDEX%20GP
+migrations/            SQL migrations (shared by node:sqlite and D1)
+src/core/              runtime-agnostic logic: rss, url, text, match, cluster, webpush, time
+src/server/            db adapters, adapters (sec, rss), ingest pipeline, notify, jobs, api (hono), node entry
+functions/api/         Cloudflare Pages Function entry
+worker/                optional cron Worker
+web/                   PWA (Vite, vanilla TS), service worker in web/public/sw.js
+tests/                 vitest unit + integration; src/scripts/e2e.ts browser test
+docs/sources.md        source matrix, endpoints, terms, failure modes
 ```
 
-Saved tickers, topics, alerts and layout persist in `data/settings.json` on the server and in the
-browser's local storage (the newer copy wins). Type `W` to see the share link for the current list.
+## Limits (read this)
 
-## Functions
-
-| Command | What it shows |
-| --- | --- |
-| `N` | My News: merged headlines for every saved ticker and topic, with a tab per item (`N AAPL`, `N AI`) |
-| `TOP` / `TOP MKT` | Top news by category: TOP MKT ECO CEN TECH ENR CRYPTO POL WLD ASIA EUR EARN CORP MNA IPO FIN HLTH REAL |
-| `NI <code>` | News by topic. Category codes above, ~90 topic codes (`NI AI`, `NI RATES`, `NI TARIFF`, `NI OIL`), or any word |
-| `NSE <text>` | Free-text news search across Google News, Bing News, GDELT, Reddit and Hacker News |
-| `<TICKER> CN` | Company news with a live quote header (`AAPL CN`, `AAPL US EQUITY CN`, `N AAPL`) |
-| `<TICKER> DES` | Description: reference data, 52-week range, YTD, SEC profile, Wikipedia summary, recent filings |
-| `<TICKER> GP` / `GIP` | Daily / intraday chart with volume, crosshair OHLC readout, 1D–5Y ranges |
-| `<TICKER> CF` | SEC EDGAR filings (8-K, 10-Q, 10-K, Form 4...) |
-| `<TICKER>` | Security menu (quote plus numbered functions) |
-| `MON` | Watchlist monitor: quotes, sparklines and the latest headline for each saved ticker and topic |
-| `W` | Watchlist editor: `W ADD AAPL,MSFT`, `W ADD NI AI`, `W DEL AAPL`, `W DEL NI AI`, `W CLR` |
-| `ALRT` | Alerts: `ALRT ADD earnings`, `ALRT DEL 1`, `ALRT CLR`. Fires a red alert bar and optional desktop notification when any watched headline matches |
-| `WEI` | World equity indices (Americas / EMEA / APAC) |
-| `FXC` | Major currency pairs plus an ECB cross-rate matrix |
-| `WB` | US Treasury yields, dollar index, bond ETFs |
-| `CRYP` | Top 25 crypto assets with 1h/24h/7d change and 7-day sparklines |
-| `MOST` | Trending tickers |
-| `ECO` / `CEN` | Economic releases (BLS, BEA, CNBC Economy) and central banks (Fed, ECB, BoE) |
-| `SECF <name>` | Security finder |
-| `LAYOUT 1|2|4` | Panel layout |
-| `HELP`, `REFRESH`, `MENU`, `CLR` | Reference, reload, back, clear |
-
-Bloomberg security syntax is accepted and mapped to free-data symbols: `SPX INDEX`, `INDU INDEX`,
-`UKX INDEX`, `NKY INDEX`, `EURUSD CURNCY`, `USDJPY CURNCY`, `CL1 COMDTY`, `GC1 COMDTY`,
-`XBT CRYPTO`, `USGG10YR`, `VOD LN EQUITY`, `7203 JP EQUITY`. Yahoo-style symbols work directly.
-
-## Keyboard
-
-`Enter` = `<GO>` · `Esc` = `<MENU>` (back) · `Tab` = next panel · `Alt+1..4` = jump to panel ·
-`PgUp/PgDn` = scroll · `↑/↓` = command history · type a row number + `<GO>` to open it ·
-start typing anywhere to focus the active command line. Autocomplete suggests functions and
-securities as you type.
-
-## Data sources (all free, no keys)
-
-News: Google News RSS, Bing News RSS, Yahoo Finance RSS, GDELT, Reddit, Hacker News, CNBC,
-MarketWatch, WSJ and Dow Jones headline feeds, FT, BBC, Reuters and AP (via Google News), Federal
-Reserve, ECB, Bank of England, BLS, BEA, SEC EDGAR, OilPrice, CoinDesk, Cointelegraph, TechCrunch,
-The Verge, Ars Technica, Politico, PR Newswire, GlobeNewswire, Nikkei Asia, SCMP, Guardian,
-Al Jazeera, Seeking Alpha, Investing.com.
-
-Market data: Yahoo Finance public chart, trending and search endpoints (Stooq as quote fallback),
-CoinGecko, Frankfurter (ECB reference rates), SEC EDGAR submissions, Wikipedia.
-
-Every source is fetched server-side with timeouts, cached with a short TTL, and served stale if a
-source is temporarily down. Each panel's status line shows how many sources responded. Feeds and
-category mappings live in `server/sources/feeds.js`; add a feed there to extend a category.
-
-SEC asks for a descriptive User-Agent: set `SEC_USER_AGENT="your app your@email"` if you run this
-for real.
-
-## Layout of the code
-
-```
-server/index.js          Express entry (PORT, HOST, DEMO, TICKERS, TOPICS, ALERTS, SETTINGS_FILE)
-server/routes.js         /api/* endpoints
-server/sources/          feeds (categories), search (ticker/topic news), market (quotes, charts), company (SEC, Wikipedia), misc (crypto, FX)
-server/lib/              dependency-free RSS/Atom parser, headline normalisation and dedupe, TTL cache, article reader
-server/demo.js           offline sample data providers (DEMO=1)
-public/js/command.js     Bloomberg-style command parser and autocomplete
-public/js/screens.js     every screen (news lists, DES, GP, WEI, FXC, CRYP, MON, W, ALRT, story reader...)
-public/js/app.js         panels, navigation stacks, keyboard, tape, clocks, alerts, settings sync
-test/                    node --test suites for the parser, normaliser, command line and API routes
-```
+- Google News and Yahoo Finance are links only. Automatic headlines come from SEC EDGAR, Google Alerts RSS, publisher/IR feeds and the optional public presets.
+- JSE SENS is a link only; attach an issuer RSS feed or plug a licensed distributor into the adapter interface.
+- Relevance is keyword-based (ticker notation, issuer name/aliases, topic terms, user include/exclude terms). Common-word tickers (AI, ON, IT…) require explicit notation or the company name. Nothing is discarded silently: filter *unmatched too* shows everything ingested.
+- Feeds are polled on a schedule; publishers add their own delays. Freshness labels are measured per source.

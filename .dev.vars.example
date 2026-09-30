@@ -1,0 +1,7 @@
+# Local secrets for `wrangler pages dev` (copy to .dev.vars; never commit .dev.vars)
+APP_TOKEN=dev-token
+JOB_TOKEN=dev-job-token
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:you@example.com
+SEC_USER_AGENT=investinews dev you@example.com
