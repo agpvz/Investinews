@@ -11,7 +11,7 @@
 name: deploy
 on:
   push:
-    branches: [main, claude/free-bloomberg-terminal-news-15r2j2]
+    branches: [main, 'claude/**']   # every push on main or a Claude working branch goes live
   workflow_dispatch:
 concurrency:
   group: deploy-production

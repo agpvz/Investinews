@@ -33,7 +33,7 @@ Data lives in `data/investinews.sqlite` (change with `DATABASE_PATH`). Migration
 
 ## Publish automatically to investinews.ammestic.co.za (Cloudflare Pages)
 
-Every push to `main` (and to the current working branch) runs `.github/workflows/deploy.yml`, which tests, builds and then provisions and deploys everything on Cloudflare: the D1 database and its migrations, the Pages project, application secrets, the production deployment, the custom domain `investinews.ammestic.co.za` with its proxied CNAME record (when the `ammestic.co.za` zone is on the same Cloudflare account), and a cron Worker that polls sources every 5 minutes. Re-runs are idempotent.
+Every push to `main` or to any `claude/*` working branch runs `.github/workflows/deploy.yml`, which tests, builds and then provisions and deploys everything on Cloudflare: the D1 database and its migrations, the Pages project, application secrets, the production deployment, the custom domain `investinews.ammestic.co.za` with its proxied CNAME record (when the `ammestic.co.za` zone is on the same Cloudflare account), and a cron Worker that polls sources every 5 minutes. Re-runs are idempotent.
 
 One-time setup, in the GitHub repository under *Settings → Secrets and variables → Actions*:
 
