@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>INVESTINEWS — Free Terminal</title>
+<meta name="description" content="A free Bloomberg-terminal-style news and market monitor built on public data sources.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000'/%3E%3Ctext x='4' y='23' font-family='monospace' font-size='18' font-weight='bold' fill='%23ffa028'%3EIN%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/terminal.css">
+</head>
+<body>
+<div id="terminal">
+  <header id="topbar">
+    <div class="brand">INVESTINEWS <span id="brand-mode" class="mode">FREE</span></div>
+    <div id="tape" class="tape"><div id="tape-track" class="tape-track"><span class="dim">loading tape…</span></div></div>
+    <div id="clocks"></div>
+  </header>
+  <div id="alertwrap"><div id="alertbar" class="alertbar hidden"></div><button id="alertclose" class="alertclose hidden" title="dismiss">✕</button></div>
+  <main id="panels" class="layout-4">
+    <section class="panel active" data-idx="0">
+      <div class="cmdline"><span class="prompt">&gt;</span><input class="cmd" type="text" autocomplete="off" spellcheck="false" placeholder="Enter function — TOP, WEI, AAPL CN, NI TECH, HELP"><span class="go" data-key="GO">&lt;GO&gt;</span></div>
+      <div class="ac hidden"></div>
+      <div class="screen-title"></div>
+      <div class="toolbar hidden"></div>
+      <div class="screen"></div>
+      <div class="panel-status"></div>
+    </section>
+    <section class="panel" data-idx="1">
+      <div class="cmdline"><span class="prompt">&gt;</span><input class="cmd" type="text" autocomplete="off" spellcheck="false" placeholder="Enter function"><span class="go" data-key="GO">&lt;GO&gt;</span></div>
+      <div class="ac hidden"></div>
+      <div class="screen-title"></div>
+      <div class="toolbar hidden"></div>
+      <div class="screen"></div>
+      <div class="panel-status"></div>
+    </section>
+    <section class="panel" data-idx="2">
+      <div class="cmdline"><span class="prompt">&gt;</span><input class="cmd" type="text" autocomplete="off" spellcheck="false" placeholder="Enter function"><span class="go" data-key="GO">&lt;GO&gt;</span></div>
+      <div class="ac hidden"></div>
+      <div class="screen-title"></div>
+      <div class="toolbar hidden"></div>
+      <div class="screen"></div>
+      <div class="panel-status"></div>
+    </section>
+    <section class="panel" data-idx="3">
+      <div class="cmdline"><span class="prompt">&gt;</span><input class="cmd" type="text" autocomplete="off" spellcheck="false" placeholder="Enter function"><span class="go" data-key="GO">&lt;GO&gt;</span></div>
+      <div class="ac hidden"></div>
+      <div class="screen-title"></div>
+      <div class="toolbar hidden"></div>
+      <div class="screen"></div>
+      <div class="panel-status"></div>
+    </section>
+  </main>
+  <footer id="statusbar">
+    <div class="keys">
+      <button class="key green" data-key="GO">GO</button>
+      <button class="key red" data-key="MENU">MENU</button>
+      <button class="key" data-key="PGUP">PG BK</button>
+      <button class="key" data-key="PGDN">PG FWD</button>
+      <button class="key" data-key="HELP">HELP</button>
+      <span class="ksep"></span>
+      <button class="key amber" data-key="N">N</button>
+      <button class="key amber" data-key="TOP">TOP</button>
+      <button class="key amber" data-key="WEI">WEI</button>
+      <button class="key amber" data-key="MON">MON</button>
+      <button class="key amber" data-key="ALRT">ALRT</button>
+      <span class="ksep"></span>
+      <button class="key" data-key="LAYOUT 1">▣</button>
+      <button class="key" data-key="LAYOUT 2">▤</button>
+      <button class="key" data-key="LAYOUT 4">▦</button>
+    </div>
+    <div id="gstatus" class="gstatus"><span class="dim">connecting…</span></div>
+  </footer>
+</div>
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

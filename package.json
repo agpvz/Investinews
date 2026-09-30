@@ -1,0 +1,18 @@
+{
+  "name": "investinews",
+  "version": "1.0.0",
+  "description": "Free Bloomberg-terminal-style news and market monitor built on free public sources",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "demo": "DEMO=1 node server/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
