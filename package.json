@@ -1,0 +1,39 @@
+{
+  "name": "investinews",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Personal market news terminal: watches for tickers and topics, persistent ingestion, event clustering, Web Push",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "node --watch --experimental-sqlite --no-warnings src/server/node.ts",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "node --experimental-sqlite --no-warnings src/server/node.ts",
+    "poll": "node src/scripts/poll.ts",
+    "vapid": "node src/scripts/vapid.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "node src/scripts/e2e.ts",
+    "cf:build": "vite build",
+    "cf:dev": "wrangler pages dev dist",
+    "cf:migrate:local": "wrangler d1 migrations apply investinews --local",
+    "cf:migrate": "wrangler d1 migrations apply investinews --remote",
+    "cf:deploy": "npm run build && wrangler pages deploy dist --project-name investinews"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.3",
+    "hono": "^4.13.11"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "concurrently": "^9.1.0",
+    "typescript": "^5.9.0",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2",
+    "wrangler": "^4.144.0"
+  }
+}
